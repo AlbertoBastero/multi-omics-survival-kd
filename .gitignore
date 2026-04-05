@@ -1,0 +1,46 @@
+# Raw data (large CSVs, not included in repo)
+data/BRCA.*.csv
+data/preprocessed/
+
+# Illumina 450k reference manifest
+illumina-450k/
+
+# All model checkpoints and experiment results (~58 GB total)
+KD-SVAE-VCDN/checkpoints/
+KD-SVAE-VCDN/checkpoints_*/
+KD-SVAE-VCDN/checkpoint_*/
+KD-SVAE-VCDN/sweep_*/
+KD-SVAE-VCDN/compare_kl_annealing/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Virtual environments
+venv/
+env/
+.env
+*.egg-info/
+
+# Claude Code project settings
+.claude/
+
+# Backup and log files
+*.backup
+*.bak
+KD-SVAE-VCDN/preprocessing_log.txt
