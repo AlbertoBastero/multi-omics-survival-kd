@@ -37,6 +37,10 @@ stu_batch_size = 32
 # Device configuration
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+# Top-down architecture: L1 all-modality teacher (per-view dimensions)
+topdown_l1_layers_size = [1024, 512, 256]
+topdown_l1_latent_dim = 64
+
 # Training hyperparameters
 default_lr = 0.001
 default_te_epochs = 15

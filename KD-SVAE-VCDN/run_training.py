@@ -90,6 +90,11 @@ def parse_args():
                         choices=['vcdn', 'concat'],
                         help='Student fusion strategy: vcdn (outer product) or concat (concatenation)')
 
+    # Architecture selection
+    parser.add_argument('--architecture', type=str, default='bottomup',
+                        choices=['bottomup', 'topdown'],
+                        help='KD architecture: bottomup (Ranjbari) or topdown')
+
     # Regularization
     parser.add_argument('--regularization', type=str, default='none',
                         choices=['none', 'l1', 'l2', 'elastic'],
@@ -621,9 +626,11 @@ def _print_and_save_cv(fold_results, fold_roc_data, fold_losses, fold_accuracies
 def main():
     args = parse_args()
 
-    print(f"\n{'='*70}\nKD-SVAE-VCDN TRAINING PIPELINE\n{'='*70}")
+    arch_label = "TOP-DOWN" if args.architecture == 'topdown' else "BOTTOM-UP"
+    print(f"\n{'='*70}\nKD-SVAE-VCDN TRAINING PIPELINE ({arch_label})\n{'='*70}")
     print(f"Device: {device}")
     print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Architecture: {args.architecture}")
     print(f"Knowledge Distillation: {'DISABLED' if args.no_distillation else 'ENABLED'}")
     print(f"Student fusion: {args.fusion}")
     if args.regularization != 'none':
@@ -636,9 +643,14 @@ def main():
     if args.kl_annealing != 'none':
         print(f"KL Annealing: {args.kl_annealing} (beta_max={args.kl_beta_max}, "
               f"warmup={args.kl_warmup_epochs}, cycle_length={args.kl_cycle_length})")
-    print(f"Architecture (Level 1): {layer_size_te1}, latent={latent_dim_te1}")
+
+    if args.architecture == 'topdown':
+        from config import topdown_l1_layers_size, topdown_l1_latent_dim
+        print(f"Architecture (L1 Teacher): {topdown_l1_layers_size}, latent={topdown_l1_latent_dim}")
+    print(f"Architecture (Level 1 / L3 Student): {layer_size_te1}, latent={latent_dim_te1}")
     print(f"Architecture (Level 2): {layer_size_te2}, latent={latent_dim_te2}")
-    print(f"Architecture (Student): {stu_layers_size}, latent={stu_latent_dim}")
+    if args.architecture == 'bottomup':
+        print(f"Architecture (Student): {stu_layers_size}, latent={stu_latent_dim}")
 
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -651,37 +663,53 @@ def main():
     print(f"  RNAseq: {kd_data['n_rnaseq_features']}")
     print(f"  Methylation: {kd_data['n_meth_features']}")
 
-    if args.cross_validation:
-        results = run_cross_validation(args, kd_data)
+    # ---- Dispatch to the chosen architecture ----
+    if args.architecture == 'topdown':
+        from run_training_topdown import (
+            train_fold_topdown, run_cross_validation_topdown,
+        )
+        if args.cross_validation:
+            results = run_cross_validation_topdown(args, kd_data)
+        else:
+            results = train_fold_topdown(kd_data, args, fold_idx=None)
+            _print_single_run_results(results, args, arch_label="Top-Down")
     else:
-        results = train_fold(kd_data, args, fold_idx=None)
-
-        print(f"\n{'='*70}\nTRAINING COMPLETE\n{'='*70}")
-        print(f"Final Test Results (Threshold = {results['optimal_threshold']:.3f}):")
-        for m in ('accuracy', 'balanced_accuracy', 'f1', 'precision', 'recall', 'auc'):
-            print(f"  {m}: {results[m]:.4f}")
-        print(f"\nModels saved to: {args.save_dir}")
-
-        rpath = os.path.join(args.save_dir, 'results.txt')
-        with open(rpath, 'w') as f:
-            f.write("KD-SVAE-VCDN Results\n" + "=" * 40 + "\n")
-            distill_str = "DISABLED" if args.no_distillation else "ENABLED"
-            f.write(f"Knowledge Distillation: {distill_str}\n")
-            f.write(f"Optimal Threshold: {results['optimal_threshold']:.4f}\n")
-            for m in ('accuracy', 'balanced_accuracy', 'f1', 'precision', 'recall', 'auc'):
-                f.write(f"{m}: {results[m]:.4f}\n")
-
-        plot_roc_curve_single(
-            results['y_test'], results['y_proba'], results['auc'],
-            save_path=os.path.join(args.save_dir, 'roc_curve.png'),
-            title="ROC Curve – KD-SVAE-VCDN")
-        plot_training_curves(
-            results['loss_history'], results['acc_history'],
-            save_path=os.path.join(args.save_dir, 'training_curves.png'),
-            title="Student Training Curves")
+        if args.cross_validation:
+            results = run_cross_validation(args, kd_data)
+        else:
+            results = train_fold(kd_data, args, fold_idx=None)
+            _print_single_run_results(results, args, arch_label="Bottom-Up")
 
     print(f"\nEnd time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     return results
+
+
+def _print_single_run_results(results, args, arch_label=""):
+    """Print and save results for a single (non-CV) training run."""
+    print(f"\n{'='*70}\nTRAINING COMPLETE ({arch_label})\n{'='*70}")
+    print(f"Final Test Results (Threshold = {results['optimal_threshold']:.3f}):")
+    for m in ('accuracy', 'balanced_accuracy', 'f1', 'precision', 'recall', 'auc'):
+        print(f"  {m}: {results[m]:.4f}")
+    print(f"\nModels saved to: {args.save_dir}")
+
+    rpath = os.path.join(args.save_dir, 'results.txt')
+    with open(rpath, 'w') as f:
+        f.write(f"KD-SVAE-VCDN Results ({arch_label})\n" + "=" * 40 + "\n")
+        distill_str = "DISABLED" if args.no_distillation else "ENABLED"
+        f.write(f"Knowledge Distillation: {distill_str}\n")
+        f.write(f"Architecture: {args.architecture}\n")
+        f.write(f"Optimal Threshold: {results['optimal_threshold']:.4f}\n")
+        for m in ('accuracy', 'balanced_accuracy', 'f1', 'precision', 'recall', 'auc'):
+            f.write(f"{m}: {results[m]:.4f}\n")
+
+    plot_roc_curve_single(
+        results['y_test'], results['y_proba'], results['auc'],
+        save_path=os.path.join(args.save_dir, 'roc_curve.png'),
+        title=f"ROC Curve – {arch_label} KD-SVAE-VCDN")
+    plot_training_curves(
+        results['loss_history'], results['acc_history'],
+        save_path=os.path.join(args.save_dir, 'training_curves.png'),
+        title=f"Training Curves – {arch_label}")
 
 
 if __name__ == '__main__':
